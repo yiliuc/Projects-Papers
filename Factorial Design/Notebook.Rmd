@@ -1,0 +1,228 @@
+---
+title: "STA305 FP Notebook"
+author: "Yiliu Cao"
+date: "2023-04-06"
+output: pdf_document
+---
+```{r}
+library(tidyverse)
+library(knitr)
+```
+
+# Data
+We firstly need to generate the data in this experiment, it includes the design matrix and the outcome.\
+For the design matrix:
+```{r}
+# Set up the factorial design with complete blocks
+# The default number of block is 2 and the number of factor is 3
+n <- 50
+x1 <- rep(c(-1, 1), 2^3*n)
+x2 <- rep(c(-1, -1, 1, 1), 2^3*n/2)
+x3 <- rep(c(rep(-1, 4),rep(1,4)), 2^3*n/4)
+
+# Distinguish the blocks for each observation
+blk <- (c(rep(1, 2^3*n), rep(2, 2^3*n)))
+run <- c(1:(2^3*n*2))
+data <- data.frame(Run = run,
+           M = x1,
+           O = x2,
+           P = x3,
+           Block = blk)
+```
+
+Generate the outcome:
+```{r}
+# Set up the outcome
+set.seed(305)
+# Different factor has different effects on the outcome
+rating <- c()
+for (i in 1:nrow(data)){
+  basic <- 50
+  if (data[i,2] == 1){
+    basic <- basic + rnorm(1, 15, 5)
+  }
+  if (data[i,3] == 1){
+    basic <- basic + rnorm(1, 15, 10)
+  }
+  if (data[i,4] == 1){
+    basic <- basic + rnorm(1, 10, 5)
+  }
+  if (basic > 100){
+    basic <- 100
+  }
+  else if (basic < 0){
+    basic <- 0
+  }
+  rating[i] <- round(basic, 0)
+}
+data$Rating <- rating
+# You can choose to export the data set
+# write.csv(data, "data_FP.csv", row.names = FALSE)
+```
+
+# Methods
+
+We firstly can pre-check the interactions of all paired factor by the interaction plots.
+```{r}
+interaction.plot(
+data$M,
+data$O,
+data$Rating,
+trace.label = "Onions",
+xlab = "Mushrooms",
+ylab = "Rating",
+main = "Figure 1: The interaction between Mushrooms and Onions"
+)
+
+interaction.plot(
+data$M,
+data$P,
+data$Rating,
+trace.label = "Pickles",
+xlab = "Mushrooms",
+ylab = "Rating",
+main = "Figure 2: The interaction between Mushrooms and Pickles"
+)
+
+interaction.plot(
+data$O,
+data$P,
+data$Rating,
+trace.label = "Pickles",
+xlab = "Onions",
+ylab = "Rating",
+main = "Figure 3: The interaction between Onions and Pickles"
+)
+```
+
+Then we can implement the statistical analysis by starting from constructing the full model fit which contains all the effects and the block.
+```{r}
+model_full <- lm(Rating ~ M*O*P + as.factor(Block), data = data)
+```
+
+
+\newpage
+
+
+Then we can build tables using the function kable() for both the sunmary table and ANOVA table.\
+For the summary table:
+```{r}
+model_f_lm <- summary(model_full)
+tibble(source = c("Intercept", "Mushrooms", "Onions", "Pickles", 
+                  "Mushrooms:Onions", "Mushrooms:Pickles", "Onions:Pickles",
+                  "Mushrooms:Onions:Pickles", "Blocks"),
+       estimate = round(model_f_lm$coefficients[,"Estimate"][c(1:4, 6:9, 5)], 4),
+       se = round(model_f_lm$coefficients[,"Std. Error"][c(1:4, 6:9, 5)], 4),
+       t = round(model_f_lm$coefficients[,"t value"][c(1:4, 6:9, 5)], 3),
+       p = round(model_f_lm$coefficients[,"Pr(>|t|)"][c(1:4, 6:9, 5)], 5)) %>% 
+  rename(`Effects` = source,
+         `Estimate` = estimate,
+         `Standard Error` = se,
+         `T value` = t,
+         `P values` = p) %>% 
+  kable(caption = "The summary of the full model")
+```
+
+For the ANOVA table:
+```{r}
+anova_f <- anova(model_full)
+tibble(source = c("Mushrooms", "Onions", "Pickles", "Mushrooms:Onions",
+                  "Mushrooms:Pickles", "Onions:Pickles", 
+                  "Mushrooms:Onions:Pickles", "Blocks", "Residuals"),
+       df = anova_f$Df[c(1:3, 5:8, 4, 9)],
+       ss = round(anova_f$`Sum Sq`[c(1:3, 5:8, 4, 9)], 0),
+       ms = round(anova_f$`Mean Sq`[c(1:3, 5:8, 4, 9)], 0),
+       f = round(anova_f$`F value`[c(1:3, 5:8, 4, 9)], 4),
+       p = round(anova_f$`Pr(>F)`[c(1:3, 5:8, 4, 9)], 5)) %>% 
+  rename(`Effects` = source,
+         `Degree of Freedom` = df,
+         `Sum of Squares` = ss,
+         `Mean Squares` = ms,
+         `F value` = f,
+         `P value` = p) %>% 
+  kable(caption = "The ANOVA table of the full model")
+```
+
+From the above linear mode, using the significance level 0.05, the significant effects are M, P, O and M:O. We can refit a new model containing only these effects, and repeat the same process.
+Construct the reduced model:
+```{r}
+model_reduced <- lm(Rating ~ M + O + P + M:O + as.factor(Block), data = data)
+```
+
+Construct the summary table using kable()
+```{r}
+model_r_lm <- summary(model_reduced)
+tibble(source = c("Intercept", "Mushrooms", "Onions", "Pickles", "Mushrooms:Onions", 
+                  "Blocks"),
+       estimate = round(model_r_lm$coefficients[,"Estimate"][c(1:4, 6, 5)], 4),
+       se = round(model_r_lm$coefficients[,"Std. Error"][c(1:4, 6, 5)], 4),
+       t = round(model_r_lm$coefficients[,"t value"][c(1:4, 6, 5)], 3),
+       p = round(model_r_lm$coefficients[,"Pr(>|t|)"][c(1:4, 6, 5)], 5)) %>% 
+  rename(`Effects` = source,
+         `Estimate` = estimate,
+         `Standard Error` = se,
+         `T value` = t,
+         `P values` = p) %>% 
+  kable(caption = "The summary of the reduced model")
+```
+
+Construct the ANOVA table using kable()
+```{r}
+anova_r <- anova(model_reduced)
+tibble(source = c("Mushrooms", "Onions", "Pickles", "Mushrooms:Onions", 
+                  "Blocks", "Residuals"),
+       df = anova_r$Df[c(1:3, 5, 4, 6)],
+       ss = anova_r$`Sum Sq`[c(1:3, 5, 4, 6)],
+       ms = anova_r$`Mean Sq`[c(1:3, 5, 4, 6)],
+       f = anova_r$`F value`[c(1:3, 5, 4, 6)],
+       p = anova_r$`Pr(>F)`[c(1:3, 5, 4, 6)]) %>% 
+  rename(`Source` = source,
+         `Degree of Freedom` = df,
+         `Sum of Squares` = ss,
+         `Mean Squares` = ms,
+         `F value` = f,
+         `P value` = p) %>% 
+  kable(caption = "The ANOVA table of the reduced model")
+```
+
+Then we need to check the assumptions of ANOVA table:\
+Checking the assumption of constancy of error variance for the reduced model:
+```{r}
+plot(model_reduced$fitted.values, 
+     model_reduced$residuals,
+     xlab = "Fitted values",
+     ylab = "Residuals",
+     main =  "Figure 4: The distribution of residuals across all fitted values")
+abline(h = 0)
+```
+
+Checking the normality of residuals:
+```{r}
+qqnorm(model_reduced$residuals,
+       main = "Figure 5: The normal QQ plot of residuals")
+qqline(model_reduced$residuals)
+```
+
+
+\newpage
+
+
+Lastly, we can find the main/interaction effects, their estimated standard error and the confidence interval.
+```{r}
+effect = 2*round(model_r_lm$coefficients[,"Estimate"][c(2:4, 6)], 4)
+sd <- 2*round(model_r_lm$coefficients[,"Std. Error"][c(2:4, 6)], 4)
+var <- sd^2
+df <- anova_r$Df[6]
+lower <- round(effect-qt(0.975, df)*sd, 3)
+upper <- round(effect+qt(0.975, df)*sd, 3)
+ci <- mapply(function(a, b) paste0("(", a, ", ", b, ")"), lower, upper)
+tibble(name = c("Mushrooms", "Onions", "Pickles", "Mushrooms:Onions"),
+       effect = effect,
+       var = var,
+       ci = ci) %>% 
+  rename(`Effects` = name,
+         `Factorial Effects` = effect,
+         `Estimated Variance` = var,
+         `95%Confidence Interval` = ci) %>% 
+  kable(caption = "The summary of the reduced model")
+```
