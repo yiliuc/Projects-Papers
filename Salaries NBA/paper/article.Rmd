@@ -1,0 +1,876 @@
+---
+title: "***What really determins the salaries for NBA players?***"
+author: "*Yiliu Cao*"
+output: pdf_document
+date: "*2022-12-17*"
+fontsize: 12pt
+header-includes:
+  - \usepackage{titling}
+  - \pretitle{\begin{flushleft}\LARGE}
+  - \posttitle{\end{flushleft}\LARGE}
+  - \preauthor{\begin{flushleft}}
+  - \postauthor{\end{flushleft}}
+  - \predate{\begin{flushleft}}
+  - \postdate{\end{flushleft}}
+---
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = FALSE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(car)
+library(gridExtra)
+library(knitr)
+```
+
+# Introduction
+
+The NBA [1] is a top sporting event in North America, and the players of the NBA are also highly regarded. One of the reasons is that players in the NBA always have a high salary, and some top players have incredibly high salaries.\
+
+It is interesting to know why some players deserve high salaries but others do not. In this analysis, I will predict the NBA player’s salaries by mainly focusing on the players’ performance on the field. Therefore, my research question will be:**What determines an NBA player’s salary, and how can we measure NBA players’ salary based on their age and their performance on the field (like Assists and Points per game, etc.)?**\
+
+There were some academic papers investigating a similar question. Lyrons JR et al. (2015 ) [2] and Sigler et al. (2000) [3] argue that the points per game, field goal rate, and rebounds per game may significantly influence a player’s salary. For my analysis, I agree that the three attributes they argued would influence the salary, and I will also include them in my model. However, they only focus on the player’s in-game performance, but I believe the player’s age is also a potential factor. Thus I will consider the player’s ages when predicting their salaries.\
+
+
+# Methods
+
+In the section, I will introduce the methods we need to predict NBA players’ salaries using linear regression.\
+
+The first thing is to divide the original data set into a training and a test data set, each containing 50% of the original data set. We will perform most analyses in the training data set. After that, we need to select the variables we will use and clean our data (e.g., remove NA observations).\
+
+Once we select all the variables, we can implement the Exploratory Data Analysis (EDA). Then we can build the full model in training data using all variables. For the full model, we first plot the response against the fitted values to check the additional condition 1 and scatterplot of all the predictors for additional condition 2. If any conditions do not hold, the patterns we see later when checking the assumptions of linear regression may not tell us what is wrong. If both additional conditions hold, we then check the assumptions of linearity, uncorrelated error, and constant variance by plotting the residuals versus fitted values and each predictor and checking the normality assumption by a Normal QQ plot.\
+
+If there are any violations of assumptions, we can use Box-Cox transformation to find appropriate transformation on predictors and response and implement what Box-Cox suggest. After we finish the transformation, we still need to check the two additional conditions and four assumptions and perform transformations until there are no severe violations of assumptions.\
+
+If there are no violations of assumptions, we may consider reducing the model. If you consider reducing the model. We will start by removing the predictors showing multicollinearity one by one and repeat this process until we find all reserved predictors are not correlated with each other. After that, we can look for candidate models. We can simply take the model we just have, which contains no multicollinearity, or we can also use the T-test to only choose the significant predictors from the transformed full model. However, the key things are that the candidate models should not have multicollinearity, and it is appropriate to remove all other predictors (by partial F test). Again, we still need to check the additional conditions and assumptions for each candidate model.\
+
+If you do not reduce the model or already have some Candidate models, we now need to perform diagnostics, including checking the multicollinearity and finding all problematic points (Leverage, Outlier, and Influential points). If the model we have now still indicates multicollinearity, we may need to change the model and recheck the additional condition and assumptions. Besides, if there are any problematic points, and it is necessary and ethical to remove them, we need to do the entire process again since we change our data set. Also, we can calculate the value of R squared, adjusted R squared, AIC, and BIC to access the goodness of the candidate models.\
+
+The last part is the Validation process. We need to apply the same transformations and fit the same models on the test data set as we did in the training data set. We then need to compare the properties of each model in each data set, including but not limited to the significance of coefficients, assumptions, multicollinearity, problematic points, etc. We will say our model is validated if our preferred models look similar to how they performed in the train data set. Otherwise, the model is not validated.\
+
+
+
+# Results
+
+For my data set, there are in total of 1408 observations, and thus there will be 704 observations for the training and the test data sets. However, there are missing values in each data set, and I have to remove them to do any further analysis. Therefore, the actual number of observations in the two data sets is 663 and 640, respectively. Besides, I only kept those 14 out of the above 40 variables. You can find more details in **Appendix 1)**.
+
+```{r}
+# read the data
+salary <- read.csv("nba_final.csv")
+```
+
+```{r}
+# Divide the data in two training and test data.
+set.seed(302)
+n <- nrow(salary)
+train_index <- sample(1:n, n/2, replace=FALSE)
+train <- salary[train_index,]
+test <- salary[-train_index,]
+train <- train %>%
+  select(Age, MP, FG, eFG., FT, FT., TRB, AST, STL, BLK, TOV, PF, PTS, Salary)
+train <- na.omit(train)
+
+test <- test %>%
+  select(Age, MP, FG, eFG., FT, FT., TRB, AST, STL, BLK, TOV, PF, PTS, Salary)
+test <- na.omit(test)
+```
+
+
+Below are the numerical and graphical summaries of each data set.
+
+```{r, include = TRUE}
+# EDA
+
+index <- c(1:14)
+calculator <- function(func, data, index){
+  vector <- c()
+  for (i in index){
+    vector[i] <- round(func(data[,index[i]]), 2) 
+  } 
+  return(vector)
+}
+
+shorted <- c("Age", "MP", "FG", "eFG.", "FT", "FT.", "TRB", "AST", "STL", "BLK", "TOV", "PF", "PTS", "Salary")
+tibble(variables = c("Age",
+                     "Minutes Played(MP)",
+                     "Field Goals per Game(FG)",
+                     "Effective Field Goal Percentage(eFG.)",
+                     "Free Throws(FT)",
+                     "Free Throws Percentage(FT.)",
+                     "Total Rebound per Game(TRB)",
+                     "Assists per Game(AST)",
+                     "Steals per Game(STL)",
+                     "Blocks per Game(BLK)",
+                     "Turnovers per Game(TOV)",
+                     "Personal Fouls per Game(PF)",
+                     "Points per Game(PTS)",
+                     "Salary"),
+       min = calculator(min, train, index),
+       median = calculator(median, train, index),
+       max = calculator(max, train, index),
+       mean = calculator(mean, train, index),
+       variance = calculator(var, train, index),
+       IQR = calculator(IQR, train, index)) %>% 
+  rename(`Variables` = variables,
+         `Minimum` = min,
+         `Median` = median,
+         `Maximum` = max,
+         `Mean` = mean,
+         `Variance` = variance,
+         `IQR` = IQR) %>% 
+  kable(caption = "The numberical summaries for training data sets")
+
+tibble(variables = c("Age",
+                     "Minutes Played(MP)",
+                     "Field Goals per Game(FG)",
+                     "Effective Field Goal Percentage(eFG.)",
+                     "Free Throws(FT)",
+                     "Free Throws Percentage(FT.)",
+                     "Total Rebound per Game(TRB)",
+                     "Assists per Game(AST)",
+                     "Steals per Game(STL)",
+                     "Blocks per Game(BLK)",
+                     "Turnovers per Game(TOV)",
+                     "Personal Fouls per Game(PF)",
+                     "Points per Game(PTS)",
+                     "Salary"),
+       min = calculator(min, test, index),
+       median = calculator(median, test, index),
+       max = calculator(max, test, index),
+       mean = calculator(mean, test, index),
+       variance = calculator(var, test, index),
+       IQR = calculator(IQR, test, index)) %>% 
+  rename(`Variables` = variables,
+         `Minimum` = min,
+         `Median` = median,
+         `Maximum` = max,
+         `Mean` = mean,
+         `Variance` = variance,
+         `IQR` = IQR) %>% 
+  kable(caption = "The numberical summaries for test data sets")
+```
+
+Table 1 and 2 show the numerical summaries of both data sets. We can see that the two data sets have a similar performance on almost every variable. However, the minimum total rebound per game is 0.2 in the training data set but 0 in the test data set. Also, the IQR of the Salary in the test data set is about 1.5 million higher than in the training data set.
+
+```{r, include = TRUE}
+# Graphical summary
+graph_salary_train <- train %>% 
+  ggplot(aes(x = Salary)) +
+  geom_histogram(bins = 30,
+                 fill = "sky blue",
+                 colour = "black") +
+  labs(title = "The distribution of Salary",
+       subtitle = "Data: Training data",
+       x = "Salary",
+       y = "Count") +
+  theme_bw()
+
+graph_salary_test <- test %>% 
+  ggplot(aes(x = Salary)) +
+  geom_histogram(bins = 30,
+                 fill = "sky blue",
+                 colour = "black") +
+  labs(title = "The distribution of Salary",
+       subtitle = "Data: Test data",
+       x = "Salary",
+       y = "Count") +
+  theme_bw()
+
+grid.arrange(graph_salary_train,
+             graph_salary_test,
+             nrow = 1,
+             top = "Figure 1: The graphical summaries of Salary in training and test data set")
+```
+
+Figure 1 shows the distribution of salary in both data sets. We can observe that they are both right-skewed, and we can also observe the salary has a higher IQR in the test data set.\
+
+We will start with the full model in the training data set, in which all variables in Table 1 are predictors with “Salary” as the response. It satisfies both additional conditions but violates the assumption of constant variance and normality. Therefore we need to do the transformations on both the response and the predictors by Box-Cox (**Appendix 2)**). For the transformed model, we found that assumption of constant variance is still violated. Now should try to reduce our model by removing the predictors showing multicollinearity one by one, and eventually, there are two candidate models. Again, we still need to check the additional assumptions for the two candidate models and assumptions. However, we can see that the two models still have violations of constant variance.
+
+```{r}
+# Fit the model in the training data
+model_full <- lm(Salary ~ ., data = train)
+summary(model_full)
+```
+
+
+```{r}
+# Checking the additional conditions and four assumptions
+
+## Checking the two additional conditions
+fit <- model_full$fitted.values
+plot(train$Salary ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(train$Salary ~ fit), lty=2)
+pairs(train[,c(-14)])
+```
+
+```{r}
+## Check the four assumptions
+residuals <- model_full$residuals
+# par(mfrow=c(4,4))
+plot(residuals ~ model_full$fitted.values, xlab="Fitted Values", ylab="Residuals")
+for(i in 1:13){
+  plot(residuals ~ train[,i], xlab = names(train)[i], ylab = "Residuals") }
+qqnorm(residuals)
+qqline(residuals)
+```
+
+
+```{r}
+# Transforamtion
+
+train <- train %>% 
+  mutate(FT = FT + 0.005,
+         FT. = FT. + 0.005,
+         TRB = TRB + 0.005,
+         AST = AST + 0.005,
+         STL = STL + 0.005,
+         BLK = BLK + 0.005,
+         TOV = TOV + 0.005,
+         PF = PF + 0.005)
+transform <- powerTransform(cbind(train[,1:14]))
+summary(transform)
+```
+
+```{r}
+## Perform transformations
+train_trans <- train %>% 
+  mutate(trans_Age = (train$Age)^(-1),
+         trans_MP = sqrt(train$MP),
+         trans_FG = sqrt(train$FG),
+         trans_eFG. = train$eFG.,
+         trans_FT = sqrt(train$FT),
+         trans_FT. = (train$FT.)^2,
+         trans_TRB = sqrt(train$TRB),
+         trans_AST = sqrt(train$AST),
+         trans_STL = sqrt(train$STL),
+         trans_BLK = sqrt(train$BLK),
+         trans_TOV = sqrt(train$TOV),
+         trans_PF = train$PF,
+         trans_PTS = sqrt(train$PTS),
+         trans_Salary = sqrt(train$Salary))
+train_trans <- train_trans[,c(15:28)]
+```
+
+
+```{r}
+# Check for the additional conditions and assumptions again
+
+## New model
+model_full2 <- lm(trans_Salary ~., data = train_trans)
+summary(model_full2)
+```
+
+```{r}
+## Checking the two additional conditions
+fit <- model_full2$fitted.values
+plot(train_trans$trans_Salary ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(train_trans$trans_Salary ~ fit), lty=2)
+pairs(train_trans[,c(1:13)])
+```
+
+```{r}
+## Check the four assumptions
+residuals <- model_full2$residuals
+
+plot(residuals ~ model_full2$fitted.values, xlab = "Fitted Values", ylab = "Residuals")
+for(i in 1:13){
+  plot(residuals ~ train_trans[,i], xlab = names(train_trans)[i], ylab = "Residuals") }
+qqnorm(residuals)
+qqline(residuals)
+```
+
+```{r}
+# Considering to reduce the model
+
+## Check for the multicollinearity
+names(train_trans)
+vif(model_full2)
+```
+
+```{r}
+# Ensure no multicollinearity in the model
+
+## Model 1: moving one predictor
+model1 <- lm(trans_Salary ~., data = train_trans[,-c(3)])
+summary(model1)
+vif(model1)
+anova(model1, model_full2)
+```
+
+```{r}
+## Model 2: moving two predictors
+model2 <- lm(trans_Salary ~., data = train_trans[,-c(2, 3)])
+summary(model2)
+vif(model2)
+anova(model2, model_full2)
+```
+
+```{r}
+## Model 3: removing three predictors
+model3 <- lm(trans_Salary ~., data = train_trans[,-c(2, 3, 5)])
+summary(model3)
+vif(model3)
+anova(model3, model_full2)
+```
+
+```{r}
+## Model 4: removing four predictors
+model4 <- lm(trans_Salary ~., data = train_trans[,-c(2, 3, 5, 11)])
+summary(model4)
+vif(model4)
+anova(model4, model_full2)
+```
+
+```{r}
+## The first Candidate model
+model_final1_train <- lm(trans_Salary ~., data = train_trans[,-c(2, 3, 5, 11)])
+summary(model_final1_train)
+vif(model_final1_train)
+anova(model_final1_train, model_full2)
+```
+
+```{r}
+## The second Candidate model
+model_final2_train <- lm(trans_Salary ~ ., data = train_trans[,-c(2, 5, 10, 11, 13)])
+names(train_trans)
+vif(model_final2_train)
+summary(model_final2_train)
+anova(model_final2_train, model_full2)
+```
+
+```{r}
+# Check the assumptions for the two candidate models
+
+## For the first Candidate model
+fit <- model_final1_train$fitted.values
+plot(train_trans$trans_Salary ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(train_trans$trans_Salary ~ fit), lty=2)
+pairs(train_trans[,-c(2, 3, 5, 11)])
+
+residuals <- model_final1_train$residuals
+plot(residuals ~ model_final1_train$fitted.values, xlab = "Fitted Values", ylab = "Residuals")
+for(i in c(1, 4, 6, 7, 8, 9, 10, 12, 13)){
+  plot(residuals ~ train_trans[,i], xlab = names(train_trans)[i], ylab = "Residuals") }
+qqnorm(residuals)
+qqline(residuals)
+```
+
+```{r}
+## For the second Candidate model
+fit <- model_final2_train$fitted.values
+plot(train_trans$trans_Salary ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(train_trans$trans_Salary ~ fit), lty=2)
+pairs(train_trans[, -c(2, 5, 10, 11, 13)])
+
+residuals <- model_final2_train$residuals
+plot(residuals ~ model_final2_train$fitted.values, xlab = "Fitted Values", ylab = "Residuals")
+for(i in c(1, 3, 4, 6, 7, 8, 9, 12)){
+  plot(residuals ~ train_trans[,i], xlab = names(train_trans)[i], ylab = "Residuals") }
+qqnorm(residuals)
+qqline(residuals)
+```
+
+
+```{r}
+# Perform diagnostics
+
+## Check multicollinearity
+vif(model_final1_train)
+vif(model_final2_train)
+```
+
+
+
+```{r}
+# Check for problematic points: The first Candidate model
+
+## values to use in cutoffs
+n <- nrow(train_trans)
+p <- length(coef(model_final1_train))-1
+
+## define the cutoffs we will use
+Hcut <- 2*((p+1)/n)
+DFFITScut <- 2*sqrt((p+1)/n)
+DFBETAcut <- 2/sqrt(n)
+Dcut <- qf(0.5, p+1, n-p-1)
+```
+
+```{r}
+## identify the leverage points
+h <- hatvalues(model_final1_train)
+l1 <- length(which(h>Hcut))
+```
+
+```{r}
+## identify the outliers
+r <- rstandard(model_final1_train)
+o1 <- length(which(r < -4 | r > 4))
+```
+
+```{r}
+## identify influential points by Cook's distance
+D <- cooks.distance(model_final1_train)
+d1 <- length(which(D > Dcut))
+```
+
+```{r}
+## Identify influential points by DFFIT
+fits <- dffits(model_final1_train)
+dffit1 <- length(which(abs(fits) > DFFITScut))
+```
+
+```{r}
+## Identify influential points by DFBETA
+betas <- dfbetas(model_final1_train)
+dim(betas)
+for(i in 1:(p+1)){
+  print(paste0("Beta ", i-1)) 
+  print(which(abs(betas[,i]) > DFBETAcut))
+}
+dfbeta_t1 <- 24
+```
+
+```{r}
+# values to use in cutoffs: The second Candidate model
+
+## Values of cutoff
+n <- nrow(train_trans)
+p <- length(coef(model_final2_train))-1
+## define the cutoffs we will use
+Hcut <- 2*((p+1)/n)
+DFFITScut <- 2*sqrt((p+1)/n)
+DFBETAcut <- 2/sqrt(n)
+Dcut <- qf(0.5, p+1, n-p-1)
+```
+
+```{r}
+## identify the leverage points
+h <- hatvalues(model_final2_train)
+l2 <- length(which(h>Hcut))
+```
+
+```{r}
+## identify the outliers
+r <- rstandard(model_final2_train)
+o2 <- length(which(r < -4 | r > 4))
+```
+
+```{r}
+## identify influential points by Cook's distance
+D <- cooks.distance(model_final2_train)
+d2 <- length(which(D > Dcut))
+```
+
+```{r}
+## Identify influential points by DFFIT
+fits <- dffits(model_final2_train)
+dffit2 <- length(which(abs(fits) > DFFITScut))
+```
+
+```{r}
+## Identify influential points by DFBETA
+betas <- dfbetas(model_final2_train)
+dim(betas)
+for(i in 1:9){
+  print(paste0("Beta ", i-1)) 
+  print(which(abs(betas[,i]) > DFBETAcut))
+}
+dfbeta_t2 <- 20
+```
+
+
+Next is to perform a diagnostic on these two models.
+```{r}
+## The goodness of training data
+r2_full_t1 <- summary(model_full2)$r.squared
+sr2_full_t1 <- summary(model_full2)$adj.r.squared
+aic_full_t1 <- AIC(model_full2)
+bic_full_t1 <- BIC(model_full2)
+vif_full <- max(vif(model_full2))
+
+r2_t1 <- summary(model_final1_train)$r.squared
+sr2_t1 <- summary(model_final1_train)$adj.r.squared
+aic_t1 <- AIC(model_final1_train)
+bic_t1 <- BIC(model_final1_train)
+vif1 <- max(vif(model_final1_train))
+
+r2_t2 <- summary(model_final2_train)$r.squared
+sr2_t2 <- summary(model_final2_train)$adj.r.squared
+aic_t2 <- AIC(model_final2_train)
+bic_t2 <- BIC(model_final2_train)
+vif2 <- max(vif(model_final2_train))
+```
+
+Model | $R^2$ | Adjusted $R^2$ | AIC | BIC | Largest VIF
+------|-------|----------------|-----|------|------------
+Full model | `r r2_full_t1` | `r sr2_full_t1` | `r aic_full_t1` | `r bic_full_t1` | `r vif_full`
+Candidate model 1 | `r r2_t1` | `r sr2_t1` | `r aic_t1` | `r bic_t1` | `r vif1`
+Candidate model 2 | `r r2_t2` | `r sr2_t2` | `r aic_t2` | `r bic_t2` | `r vif2`
+
+Table: The summary of goodness of the full model and the two Candidate models
+
+Table 3 summarizes the goodness of the transformed full model and the two Candidate models. We can see that the Candidate models have a lower value of AIC and BIC than the full model and a lower multicollinearity.
+
+```{r}
+# Validation process
+
+## Perform transformations in test data
+test_trans <- test %>% 
+  mutate(trans_Age = (test$Age)^(-1),
+         trans_MP = sqrt(test$MP),
+         trans_FG = sqrt(test$FG),
+         trans_eFG. = test$eFG.,
+         trans_FT = sqrt(test$FT),
+         trans_FT. = (test$FT.)^2,
+         trans_TRB = sqrt(test$TRB),
+         trans_AST = sqrt(test$AST),
+         trans_STL = sqrt(test$STL),
+         trans_BLK = sqrt(test$BLK),
+         trans_TOV = sqrt(test$TOV),
+         trans_PF = test$PF,
+         trans_PTS = sqrt(test$PTS),
+         trans_Salary = sqrt(test$Salary))
+test_trans <- test_trans[,c(15:28)]
+```
+
+```{r}
+## The full models
+model_full_test <- lm(Salary ~ ., data = test)
+model_full2_test <- lm(trans_Salary ~., data = test_trans)
+summary(model_full2_test)
+```
+
+
+```{r}
+## For the first Candidate model
+model_final1_test <- lm(trans_Salary ~., data = test_trans[,-c(2, 3, 5, 11)])
+summary(model_final1_test)
+vif(model_final1_test)
+AIC(model_final1_test)
+anova(model_final1_test, model_full2_test)
+```
+
+```{r}
+## For the second Candidate model
+model_final2_test <- lm(trans_Salary ~ ., data = test_trans[,-c(2, 5, 10, 11, 13)])
+vif(model_final2_test)
+summary(model_final2_test)
+anova(model_final2_test, model_full2_test)
+```
+
+
+```{r}
+# Check the assumptions for the two candidate models
+
+## For the first model in test data 
+fit <- model_final1_test$fitted.values
+plot(test_trans$trans_Salary ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(test_trans$trans_Salary ~ fit), lty=2)
+pairs(test_trans[,-c(2, 3, 5, 11)])
+
+residuals <- model_final1_test$residuals
+plot(residuals ~ model_final1_test$fitted.values, xlab = "Fitted Values", ylab = "Residuals")
+for(i in c(1, 4, 6, 7, 8, 9, 10, 12, 13)){
+  plot(residuals ~ test_trans[,i], xlab = names(test_trans)[i], ylab = "Residuals") }
+qqnorm(residuals)
+qqline(residuals)
+```
+
+
+```{r}
+## For the second model in test data
+fit <- model_final2_test$fitted.values
+plot(test_trans$trans_Salary ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(test_trans$trans_Salary ~ fit), lty=2)
+pairs(test_trans[, -c(2, 5, 10, 11, 13)])
+
+residuals <- model_final2_test$residuals
+plot(residuals ~ model_final2_test$fitted.values, xlab = "Fitted Values", ylab = "Residuals")
+for(i in c(1, 3, 4, 6, 7, 8, 9, 12)){
+  plot(residuals ~ test_trans[,i], xlab = names(test_trans)[i], ylab = "Residuals") }
+qqnorm(residuals)
+qqline(residuals)
+```
+
+```{r}
+# Check for problematic points in test data: The first model
+
+## values to use in cutoffs
+n <- nrow(test_trans)
+p <- length(coef(model_final1_test))-1
+## define the cutoffs we will use
+Hcut <- 2*((p+1)/n)
+DFFITScut <- 2*sqrt((p+1)/n)
+DFBETAcut <- 2/sqrt(n)
+Dcut <- qf(0.5, p+1, n-p-1)
+```
+
+```{r}
+## identify the leverage points
+h <- hatvalues(model_final1_test)
+vl1 <- length(which(h>Hcut))
+```
+
+```{r}
+## identify the outliers
+r <- rstandard(model_final1_test)
+vo1 <- length(which(r < -4 | r > 4))
+```
+
+```{r}
+## identify influential points by Cook's distance
+D <- cooks.distance(model_final1_test)
+vd1 <- length(which(D > Dcut))
+```
+
+```{r}
+## Identify influential points by DFFIT
+fits <- dffits(model_final1_test)
+vdffit1 <- length(which(abs(fits) > DFFITScut))
+```
+
+```{r}
+## Identify influential points by DFBETA
+betas <- dfbetas(model_final1_test)
+dim(betas)
+for(i in 1:(p+1)){
+  print(paste0("Beta ", i-1)) 
+  print(which(abs(betas[,i]) > DFBETAcut))
+}
+dfbeta_v1 <- 20
+```
+
+
+```{r}
+# Check for problematic points in test data: The second model
+
+## values to use in cutoffs
+n <- nrow(test_trans)
+p <- length(coef(model_final2_test))-1
+## define the cutoffs we will use
+Hcut <- 2*((p+1)/n)
+DFFITScut <- 2*sqrt((p+1)/n)
+DFBETAcut <- 2/sqrt(n)
+Dcut <- qf(0.5, p+1, n-p-1)
+```
+
+```{r}
+## identify the leverage points
+h <- hatvalues(model_final2_test)
+vl2 <- length(which(h>Hcut))
+```
+
+```{r}
+## identify the outliers
+r <- rstandard(model_final2_test)
+vo2 <- length(which(r < -4 | r > 4))
+```
+
+```{r}
+## identify influential points by Cook's distance
+D <- cooks.distance(model_final2_test)
+vd2 <- length(which(D > Dcut))
+```
+
+```{r}
+## Identify influential points by DFFIT
+fits <- dffits(model_final2_test)
+vdffit2 <- length(which(abs(fits) > DFFITScut))
+```
+
+```{r}
+## Identify influential points by DFBETA
+betas <- dfbetas(model_final2_test)
+dim(betas)
+for(i in 1:(p+1)){
+  print(paste0("Beta ", i-1)) 
+  print(which(abs(betas[,i]) > DFBETAcut))
+}
+dfbeta_v2 <- 21
+```
+
+
+```{r}
+## The goodness of test data
+r2_v1 <- summary(model_final1_test)$r.squared
+sr2_v1 <- summary(model_final1_test)$adj.r.squared
+aic_v1 <- AIC(model_final1_test)
+bic_v1 <- BIC(model_final1_test)
+vvif1 <- max(vif(model_final1_test))
+
+r2_v2 <- summary(model_final2_test)$r.squared
+sr2_v2 <- summary(model_final2_test)$adj.r.squared
+aic_v2 <- AIC(model_final2_test)
+bic_v2 <- BIC(model_final2_test)
+vvif2 <- max(vif(model_final2_test))
+```
+
+
+Up to now, we have built two models and performed the diagnostic. We should do the validation process now, and the results are shown below.
+
+```{r}
+# Comparing the two models
+
+## For model 1
+coefs1 <- round(summary(model_final1_train)$coefficients[,1], 3)
+ses1 <- round(summary(model_final1_train)$coefficients[,2], 3)
+vcoefs1 <- round(summary(model_final1_test)$coefficients[,1], 3)
+vses1 <- round(summary(model_final1_test)$coefficients[,2], 3)
+
+## For model 2
+coefs2 <- round(summary(model_final2_train)$coefficients[,1], 3)
+ses2 <- round(summary(model_final2_train)$coefficients[,2], 3)
+vcoefs2 <- round(summary(model_final2_test)$coefficients[,1], 3)
+vses2 <- round(summary(model_final2_test)$coefficients[,2], 3)
+```
+
+
+
+Characteristic | Model1 (Train) | Model1 (Test) | Model 2 (Train) | Model 2 (Test)
+---------------|----------------|---------------|-----------------|---------------
+${R}^2$ | `r r2_t1` | `r r2_v1` | `r r2_t2` | `r r2_v2`
+Adjusted $R^2$ | `r sr2_t1` | `r sr2_v1` | `r sr2_t2` | `r sr2_v2`
+AIC | `r aic_t1` | `r aic_v1` | `r aic_t2` | `r aic_v2`
+BIC | `r bic_t1` | `r bic_v1` | `r bic_t2` | `r bic_v2`
+Largest VIF value | `r vif1` | `r vvif1` | `r vif2` | `r vvif2`
+\# Leverage points | `r l1` | `r vl1` | `r l2` | `r vl2`
+\# Outliers  | `r o1` | `r vo1` | `r o2` | `r vo2`
+\# Cook's D | `r d1` | `r vd1` | `r d2` | `r vd2`
+\# DFFITS   | `r dffit1`| `r vdffit1`| `r dffit2`| `r vdffit2`
+\# DFBETAS  | `r dfbeta_t1` | `r dfbeta_v1` | `r dfbeta_t2` | `r dfbeta_v2`
+Violations | Constant Variance | Constant Variance & Normality | Constant Variance | Constant Variance & Normality
+---------------|----------------|---------------|-----------------|---------------
+Intercept | `r coefs1[1]` $\pm$ `r ses1[1]` (\*) | `r vcoefs1[1]` $\pm$ `r vses1[1]` (\*) |`r coefs2[1]` $\pm$ `r ses2[1]` (\*) | `r vcoefs2[1]` $\pm$ `r vses2[1]` (\*)
+$1/Age$  | `r coefs1[2]` $\pm$ `r ses1[2]` (\*)|`r vcoefs1[2]` $\pm$ `r vses1[2]` (\*)| `r coefs2[2]` $\pm$ `r ses2[2]` (\*) | `r vcoefs2[2]` $\pm$ `r vses2[2]` (\*)
+$\sqrt{FG}$  | - | -| `r coefs2[3]` $\pm$ `r ses2[3]` (\*) | `r vcoefs2[3]` $\pm$ `r vses2[3]` (\*)
+eFG. | `r coefs1[3]` $\pm$ `r ses1[3]` (\*) | `r vcoefs1[3]` $\pm$ `r vses1[3]`(\*) | `r coefs2[4]` $\pm$ `r ses2[4]` (\*) | `r vcoefs2[4]` $\pm$ `r vses2[4]`(\*)
+$FT.^2$  | `r coefs1[4]` $\pm$ `r ses1[4]`  (\*) | `r vcoefs1[4]` $\pm$ `r vses1[4]`  | `r coefs2[5]` $\pm$ `r ses2[5]` | `r vcoefs2[5]` $\pm$ `r vses2[5]` 
+$\sqrt{TRB}$  | `r coefs1[5]` $\pm$ `r ses1[5]` (\*) | `r vcoefs1[5]` $\pm$ `r vses1[5]` (\*) | `r coefs2[6]` $\pm$ `r ses2[6]` (\*) | `r vcoefs2[6]` $\pm$ `r vses2[6]` (\*)
+$\sqrt{AST}$  | `r coefs1[6]` $\pm$ `r ses1[6]`   | `r vcoefs1[6]` $\pm$ `r vses1[6]` (\*) | `r coefs2[7]` $\pm$ `r ses2[7]`  | `r vcoefs2[7]` $\pm$ `r vses2[7]`(\*)
+$\sqrt{STL}$  | `r coefs1[7]` $\pm$ `r ses1[7]`  | `r vcoefs1[7]` $\pm$ `r vses1[7]`  | `r coefs2[8]` $\pm$ `r ses2[8]` | `r vcoefs2[8]` $\pm$ `r vses2[8]`
+$\sqrt{BLK}$  | `r coefs1[8]` $\pm$ `r ses1[8]`   | `r vcoefs1[8]` $\pm$ `r vses1[8]` (\*) | - | - 
+PF   | `r coefs1[9]` $\pm$ `r ses1[9]`  (\*) | `r vcoefs1[9]` $\pm$ `r vses1[9]`  | `r coefs2[9]` $\pm$ `r ses2[9]` (\*) | `r vcoefs2[9]` $\pm$ `r vses2[9]`
+$\sqrt{PTS}$  | `r coefs1[10]` $\pm$ `r ses1[10]` (\*) | `r vcoefs1[10]` $\pm$ `r vses1[10]` (\*) | -  | -
+
+Table: Summary of characteristics of two candidate models in the training and test data sets (Response: $\sqrt{Salary}$). Coefficients are presented as estimate ± SE (* = significant t-test at $\alpha$ = 0.05)
+
+
+Table 4 shows the validation process for the two data sets and two models.\
+
+Comparing the general performance of the two models, model 2 seems to be better than model 1. Even though model 2 has a similar goodness to model 1, the percentage difference in estimates is much less than model 1. Therefore I will use model 2 to predict NBA players’ Salaries.
+
+
+# Discussion
+
+From previous parts, we have concluded the final model to predict the NBA players’ Salaries is model 2. From the model 2, it tells us we can use a player’s age, field goals per game, Effective Field Goal Percentage, Free Throw Percentage, Total Rebound per game, Assists per game, Steals per game, and Personal Fouls per Game to predict a player’s salary. Besides, we expect a 164.87 decrease in the square root of salary for every unit increase in Personal Fouls per Game. This makes sense as those “aggressive” usually can not live long in the NBA and thus have a lower salary. However, remember we need transformations when we implement the model.\
+
+Now, we can answer our research question. The predictors I just stated will be highly influencing players’ salaries. Using model 2 in Table 4, we can measure NBA players’ salaries.\
+
+However, there are still some limitations in my analysis.\
+
+1. There is always a violation of the assumption of constant variance. Perhaps our data is small and has too many variations, but there are also a relatively large proportion of leverage points in our models. Hence, this may reduce the accuracy of our models, and the prediction of salaries may be less reliable.\
+
+2. The adjusted R squared is relatively small, and values of AIC and BIC are still relatively large, indicating that the goodness of our models still needs to be enhanced. The possible reason is that our models are not complicated enough. We may try to add more predictors.\
+
+3. The model transformation we perform by Box-Cox transformation may be too simple. This means that we used the rounded value of lambda from the Box-Cox transformation. This may result in some possible assumption violations as we did not follow precisely what Box-Cox suggests.\
+
+4. We can not validate the model. This means we can only use the information to understand the limitations better. The potential reasons are similar to the first one; our transformation may be too specific to training data and can not help with the test data.\
+
+In conclusion, we can use linear regression to predict NBA players’ salaries. However, some limitations still exist and can be improved in future analyses.
+
+
+
+\newpage
+
+
+
+# Reference list
+
+1. Wikimedia Foundation. (2022, December 2). National Basketball Association. Wikipedia. Retrieved December 20, 2022, from [https://en.wikipedia.org/wiki/National_Basketball_Association](https://en.wikipedia.org/wiki/National_Basketball_Association)\ 
+
+2. Lyons Jr, R., Jackson Jr, E. N., & Livingston, A. (2015). Determinants of NBA Player Salaries. The Sport Journal. [https://doi.org/ 10.17682/sportjournal/2015.019](https://doi.org/ 10.17682/sportjournal/2015.019)
+
+3. Sigler, K. J., & Sackley, W. H. (2000). NBA players: are they paid for performance? Managerial Finance, 26(7), 46–51. [https:// doi.org/10.1108/03074350010766783](https:// doi.org/10.1108/03074350010766783)
+
+4. Analysis, P. (2020, January 10). Understanding basketball analytics: EFG% vs. FG%. PivotAnalysis. Retrieved December 20, 2022, from [https://www.pivotanalysis.com/post/what-is-efg](https://www.pivotanalysis.com/post/what-is-efg)
+
+
+\newpage
+
+
+
+# Appendix
+
+**1)**. Justifications about the variables I removed from the original data set.\
+Below is the summary of variables which I removed initially.
+
+```{r, include = TRUE}
+tibble(name1 = c("Player's name",
+                 "Player's ID",
+                 "The first position",
+                 "The second position",
+                 "The player's team",
+                 "The game played",
+                 "The game started",
+                 "Daily views on wikipedia",
+                 "Seaon of NBA",
+                 "Player's conference",
+                 "Players's role",
+                 "If the player played in the all star game"),
+       name2 = c("The field goal attempt",
+                 "The Filed goal rate",
+                 "3-Point Field Goals Per Game",
+                 "3-Point Field Goal Attempts Per Game",
+                 "FG% on 3-Pt FGA",
+                 "2-Point Field Goals Per Game",
+                 "2-Point Field Goal Attempts Per Game",
+                 "FG% on 2-Pt FGA",
+                 "Free Throw Attempts Per Game",
+                 "Offensive Rebounds Per Game",
+                 "Defensive Rebounds Per Game", ""),
+       name3 = c("Rk",
+                 "Fvot",
+                 "FRank",
+                 "Pvot",
+                 "PRank",
+                 "Mvot",
+                 "MRank",
+                 "Score", "", "", "", "")) %>% 
+  rename(`Category 1` = name1,
+         `Category 2` = name2,
+         `Category 3` = name3) %>% 
+  kable(caption = "The summary of initally removed variables")
+```
+
+Table 5 shows the summary of variables that I removed initially.\
+
+For the variables in "Category 1": I remove them because they are useless for predicting a player's salary. For instance, we can not predict a player's salary according to his name.\
+
+For the variables in 'Category 2": The reason why I remove them is that they are redundant, and I reserve a similar variable. For instance, I keep the variable "Total Rebound per Game" so that it is unnecessary for me to still keep "Offensive Rebound per Game" and "Defensive Rebound per Game."\
+
+For the variables in "Category 3": The reason why I remove them is that the data source link does not provide what they mean. For instance, I do not know what "Rk" means or the difference between "FRank" and "PRank." You can refer to Table 1 or Table 2 for more details about the variables I kept. Besides, I choose to use an Effective Field Goal Rate instead of Field Goal Rate [4].\
+
+**2)**. The results of Box-Cox transformation is:
+
+Variables | Original form (Shorted Names) | After Transformation 
+---------------|----------------|---------------
+Age | Age | $1/Age$
+Minutes Played | MP | $\sqrt{MP}$
+Field Goals per Game | FG | $\sqrt{FG}$
+Effective Field Goal Percentage | eFG. | eFG.
+Free Throws | FT | $\sqrt{FT}$
+Free Throws Percentage | FT. | $FT.^2$
+Total Rebound per Game | TRB | $\sqrt{TRB}$
+Assists per Game | AST | $\sqrt{AST}$
+Steals per Game | STL | $\sqrt{STL}$
+Blocks per Game | BLK | $\sqrt{BLK}$
+Turnovers per Game | TOV | $\sqrt{TOV}$
+Personal Fouls per Game | PF | PF
+Points per Game | PTS | $\sqrt{PTS}$
+Salary | Salary | $\sqrt{Salary}$
+
+Table: The summary of Box-Cox transformation in the training data set for the full model 
